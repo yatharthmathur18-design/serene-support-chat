@@ -8,8 +8,8 @@ import path from 'node:path';
 export const PRIVATE_DIR = path.join(os.homedir(), '.serene');
 fs.mkdirSync(PRIVATE_DIR, { recursive: true, mode: 0o700 });
 
-export const DB_PATH = process.env.DB_PATH || path.join(PRIVATE_DIR, 'serene.db');
-export const LOG_PATH = path.join(PRIVATE_DIR, 'serene.log');
+export const DB_PATH = process.env.DB_PATH || (process.env.NETLIFY ? '/tmp/serene.db' : path.join(PRIVATE_DIR, 'serene.db'));
+export const LOG_PATH = process.env.NETLIFY ? '/tmp/serene.log' : path.join(PRIVATE_DIR, 'serene.log');
 
 const legacy = path.join(process.cwd(), 'data', 'serene.db');
 if (DB_PATH !== legacy && !fs.existsSync(DB_PATH) && fs.existsSync(legacy)) {
