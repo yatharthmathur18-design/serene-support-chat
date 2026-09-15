@@ -14,7 +14,37 @@
 </head>
 <body>
 
-<div id="chatView" class="app">
+<!-- AUTH — local only, like bemineai gate -->
+<main id="authView" class="auth hidden">
+  <section class="auth-editorial">
+    <div class="brandmark">
+      <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><path d="M16 3C10 8 7 13.5 7 19a9 9 0 0 0 18 0c0-5.5-3-11-9-16Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M16 12v13M16 17c-2.5 0-4.5-1.2-5.5-3M16 20c2.5 0 4.5-1.2 5.5-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <span>Serene</span>
+    </div>
+    <h1>A quiet place<br />to be <em>heard.</em></h1>
+    <p class="lede">A private companion that listens first — slowly, warmly, without judgment. Sign in to enter your space.</p>
+    <div class="breath-ring" aria-hidden="true"><span></span></div>
+    <p class="breath-caption">Breathe in… and out. There's no rush here.</p>
+  </section>
+  <section class="auth-panel">
+    <div class="auth-card">
+      <h2 id="authTitle">Welcome</h2>
+      <p class="auth-sub">This stays on your device — no cloud account.</p>
+      <div class="tabs" role="tablist">
+        <button id="tabLogin" class="tab active" role="tab">Sign in</button>
+        <button id="tabRegister" class="tab" role="tab">Create account</button>
+      </div>
+      <label class="field" id="nameWrap" hidden><span>What should we call you?</span><input id="authName" type="text" placeholder="A name, or anything kind" autocomplete="nickname" /></label>
+      <label class="field"><span>Email</span><input id="authEmail" type="email" placeholder="you@example.com" autocomplete="email" inputmode="email" /></label>
+      <label class="field"><span>Password</span><input id="authPass" type="password" placeholder="At least 8 characters" autocomplete="current-password" /></label>
+      <button id="emailBtn" class="btn primary">Continue</button>
+      <p id="authMsg" class="msg" role="status" aria-live="polite"></p>
+      <p class="auth-hint">Like bemineai — just your device, no server password check.</p>
+    </div>
+  </section>
+</main>
+
+<div id="chatView" class="app hidden">
   <header class="topbar">
     <button id="menuBtn" class="icon-btn" aria-label="Open settings" aria-controls="drawer">
       <svg viewBox="0 0 20 20" width="20" height="20"><path d="M3 5.5h14M3 10h14M3 14.5h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
@@ -23,14 +53,14 @@
       <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><path d="M16 3C10 8 7 13.5 7 19a9 9 0 0 0 18 0c0-5.5-3-11-9-16Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
       <strong>Serene</strong>
     </div>
-    <div class="presence"><span class="dot" aria-hidden="true"></span><span>Private — on this device</span></div>
+    <div class="presence"><span class="dot" aria-hidden="true"></span><span id="presenceText">Private — on this device</span></div>
   </header>
 
   <div id="scrim" class="scrim" hidden></div>
 
   <aside id="drawer" class="drawer" aria-label="Settings">
     <div class="drawer-head">
-      <div class="me"><div id="avatar" aria-hidden="true">S</div><div><b>Serene</b><small>Local only · No account</small></div></div>
+      <div class="me"><div id="avatar" aria-hidden="true">S</div><div><b id="meName">…</b><small id="meEmail">…</small></div></div>
       <button id="closeDrawer" class="icon-btn" aria-label="Close settings">
         <svg viewBox="0 0 16 16" width="16" height="16"><path d="M3 3l10 10M13 3 3 13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
       </button>
@@ -53,12 +83,13 @@
     <p class="drawer-label">Your data</p>
     <div class="data-actions">
       <button id="wipeBtn" class="btn quiet">Erase all conversations</button>
+      <button id="logoutBtn" class="btn quiet">Sign out</button>
     </div>
-    <p class="disclaimer">Everything stays on this device (browser storage). Clear it anytime. Serene is a caring listener, not a professional.</p>
+    <p class="disclaimer">Everything stays on this device (browser storage). Serene is a caring listener, not a professional.</p>
   </aside>
 
   <main class="chat">
-    <div class="day-note"><b id="greet">Take a breath…</b><small>Private · no login · no cloud copy</small></div>
+    <div class="day-note"><b id="greet">Take a breath…</b><small id="secureNote">Private · no cloud copy</small></div>
     <div id="offlineBadge" class="offline hidden">Gentle offline mode — live AI returns when the backend reconnects</div>
     <div id="messages" class="messages" aria-live="polite"></div>
     <div id="typing" class="typing hidden" aria-hidden="true"><span></span><span></span><span></span></div>

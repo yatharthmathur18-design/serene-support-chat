@@ -206,6 +206,7 @@ button{ font-family: inherit; }
 .persona input:checked + .p-card{ border-color: var(--primary); background: var(--primary-soft); box-shadow: inset 0 0 0 1px var(--primary); }
 .persona input:focus-visible + .p-card{ outline: 2.5px solid var(--primary); outline-offset: 2px; }
 .adapt{ font-size: .82rem; color: var(--muted); background: var(--bg); border: 1px dashed var(--line); border-radius: var(--radius-sm); padding: 9px 12px; margin: 10px 0 0; }
+.auth-hint{ font-size:.78rem; color:var(--faint); margin:10px 0 0; text-align:center; }
 .palettes{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .palette{
   border: 1px solid var(--line); background: var(--bg); color: var(--ink);

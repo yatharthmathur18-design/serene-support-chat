@@ -1,12 +1,14 @@
-// Serene — 100% local, no login, no database.
+// Serene — local login (like bemineai) + local storage, no DB.
 
 const $ = (s) => document.querySelector(s);
 let personalities = { auto: { label: 'Auto-Adapt', desc: 'Reads your feelings and gently matches your energy.' } };
 
 const LS_KEY = 'serene:convs';
 const LS_CURRENT = 'serene:current';
+const LS_USER = 'serene:user';
 let convs = [];
 let currentId = null;
+let mode = 'login';
 
 const EMOTION_LABEL = {
   anxious: 'sensing some anxiety — softening my tone',
@@ -56,6 +58,7 @@ function saveStore() {
 }
 function getCurrent() { return convs.find(c => c.id === currentId) || null; }
 function newId() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
+function getUser() { try { return JSON.parse(localStorage.getItem(LS_USER) || 'null'); } catch { return null; } }
 
 /* palette */
 function setPalette(p) {
@@ -76,10 +79,62 @@ $('#closeDrawer').onclick = closeDrawer;
 scrim.onclick = closeDrawer;
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer.classList.contains('open')) closeDrawer(); });
 
-/* greet */
-{
+/* auth — local, bemineai-style */
+function syncTabs() {
+  $('#tabLogin').classList.toggle('active', mode === 'login');
+  $('#tabRegister').classList.toggle('active', mode === 'register');
+  $('#nameWrap').hidden = mode !== 'register';
+  $('#authTitle').textContent = mode === 'register' ? 'Create your space' : 'Welcome back';
+  $('#emailBtn').textContent = mode === 'register' ? 'Create & enter' : 'Sign in';
+}
+$('#tabLogin').onclick = () => { mode = 'login'; syncTabs(); };
+$('#tabRegister').onclick = () => { mode = 'register'; syncTabs(); };
+
+function showAuth() {
+  $('#authView').classList.remove('hidden');
+  $('#chatView').classList.add('hidden');
+  syncTabs();
+}
+function showChat(user) {
+  $('#authView').classList.add('hidden');
+  $('#chatView').classList.remove('hidden');
+  const name = user.name || user.email.split('@')[0];
+  $('#meName').textContent = name;
+  $('#meEmail').textContent = user.email;
+  $('#avatar').textContent = (name[0] || 'S').toUpperCase();
   const h = new Date().getHours();
-  $('#greet').textContent = h < 12 ? 'Good morning — take a breath…' : h < 18 ? 'Good afternoon — take a breath…' : 'Good evening — take a breath…';
+  $('#greet').textContent = (h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening') + `, ${name} — take a breath…`;
+}
+
+$('#emailBtn').onclick = () => {
+  const email = $('#authEmail').value.trim().toLowerCase();
+  const pass = $('#authPass').value;
+  const name = $('#authName').value.trim();
+  $('#authMsg').textContent = '';
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { $('#authMsg').textContent = 'Please enter a valid email.'; return; }
+  if (pass.length < 8) { $('#authMsg').textContent = 'Password needs at least 8 characters.'; return; }
+  if (mode === 'register' && !name) { $('#authMsg').textContent = 'Please enter what we should call you.'; return; }
+
+  const existing = getUser();
+  if (mode === 'login') {
+    if (!existing || existing.email !== email) { $('#authMsg').textContent = 'No account with that email on this device — try Create account.'; return; }
+    if (existing.password !== pass) { $('#authMsg').textContent = 'Wrong password — take a breath and try again.'; return; }
+    enterChat(existing);
+  } else {
+    if (existing && existing.email === email) { $('#authMsg').textContent = 'That email already exists on this device — try Sign in.'; return; }
+    const user = { email, password: pass, name: name || email.split('@')[0] };
+    localStorage.setItem(LS_USER, JSON.stringify(user));
+    enterChat(user);
+  }
+};
+
+function enterChat(user) {
+  showChat(user);
+  loadStore();
+  loadPersonalities().then(() => {
+    renderConvs();
+    renderMessages();
+  });
 }
 
 /* conversations */
@@ -192,7 +247,6 @@ $('#composer').onsubmit = async (e) => {
   ta.value = ''; ta.style.height = 'auto';
   ensureCurrent();
   const cur = getCurrent();
-  // clear welcome if first real message
   if (cur.messages.length === 0) $('#messages').innerHTML = '';
   const userMsg = { role: 'user', content: text, created_at: Date.now() };
   cur.messages.push(userMsg);
@@ -205,7 +259,6 @@ $('#composer').onsubmit = async (e) => {
   $('#typing').classList.remove('hidden');
   try {
     const history = cur.messages.slice(-20).map(m => ({ role: m.role, content: m.content }));
-    // remove the just-added user msg from history (server adds it)
     history.pop();
     const { reply, emotion, offline } = await api('/api/chat', {
       method: 'POST',
@@ -239,15 +292,22 @@ document.querySelectorAll('.quick button').forEach((b) => (b.onclick = () => { $
   $('#input').addEventListener('focus', () => { setTimeout(() => { sync(); msgs().scrollTop = msgs().scrollHeight; }, 350); });
 })();
 
-/* wipe */
+/* data */
 $('#wipeBtn').onclick = () => {
   if (!confirm('Erase all conversations on this device? This cannot be undone.')) return;
   convs = []; currentId = null; saveStore(); renderConvs(); renderMessages();
   if (innerWidth < 920) closeDrawer();
 };
+$('#logoutBtn').onclick = () => {
+  if (!confirm('Sign out? Your chats stay on this device, you can sign back in with the same email.')) return;
+  localStorage.removeItem(LS_USER);
+  location.reload();
+};
 
 /* boot */
-loadStore();
-loadPersonalities();
-renderConvs();
-renderMessages();
+{
+  loadStore();
+  const user = getUser();
+  if (user) enterChat(user);
+  else showAuth();
+}
