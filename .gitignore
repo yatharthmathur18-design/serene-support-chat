@@ -1,0 +1,8 @@
+node_modules/
+.env
+data/
+*.log
+DEMO-ACCOUNT.txt
+*.db-shm
+*.db-wal
+.serene/

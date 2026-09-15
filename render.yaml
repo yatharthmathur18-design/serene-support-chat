@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: serene-support-chat
+    runtime: node
+    # NOTE: persistent disk needs a paid plan (Starter+). On the free tier the
+    # app still runs, but the database is wiped on every restart/deploy.
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    disk:
+      name: serene-data
+      mountPath: /var/serene-data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: HOST
+        value: 0.0.0.0
+      - key: DB_PATH
+        value: /var/serene-data/serene.db
+      - key: CLIENT_ORIGIN
+        value: https://serene-support-chat.onrender.com # <-- change to YOUR url after first deploy
+      - key: SECURE_COOKIES
+        value: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATA_ENCRYPTION_KEY
+        generateValue: true
+      - key: OPENCODE_BASE_URL
+        value: https://integrate.api.nvidia.com/v1
+      - key: OPENCODE_MODEL
+        value: openai/gpt-oss-20b
+      - key: OPENCODE_API_KEY
+        sync: false # paste your nvapi- key in the dashboard
+      - key: RETENTION_DAYS
+        value: 30
