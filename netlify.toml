@@ -9,8 +9,9 @@
 
 [[redirects]]
   from = "/api/*"
-  to = "/.netlify/functions/api"
+  to = "/.netlify/functions/api/:splat"
   status = 200
+  force = false
 
 # SPA fallback — must be last
 [[redirects]]

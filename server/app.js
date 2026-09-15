@@ -51,46 +51,46 @@ authRoutes(app);
 
 app.get('/api/personalities', (req, res) => res.json(PERSONALITIES));
 
-app.get('/api/chat/conversations', authMiddleware, (req, res) => {
-  res.json({ conversations: listConversations(req.user.id) });
+app.get('/api/chat/conversations', authMiddleware, async (req, res) => {
+  res.json({ conversations: await listConversations(req.user.id) });
 });
-app.post('/api/chat/conversations', authMiddleware, (req, res) => {
+app.post('/api/chat/conversations', authMiddleware, async (req, res) => {
   const { title = '' } = req.body || {};
-  res.json({ conversation: createConversation(req.user.id, title || 'New conversation') });
+  res.json({ conversation: await createConversation(req.user.id, title || 'New conversation') });
 });
-app.patch('/api/chat/conversations/:id', authMiddleware, (req, res) => {
-  const conv = getConversation(req.user.id, req.params.id);
+app.patch('/api/chat/conversations/:id', authMiddleware, async (req, res) => {
+  const conv = await getConversation(req.user.id, req.params.id);
   if (!conv) return res.status(404).json({ error: 'Conversation not found.' });
   const { title = '' } = req.body || {};
-  touchConversation(conv.id, String(title).slice(0, 80) || conv.title);
-  res.json({ conversation: getConversation(req.user.id, conv.id) });
+  await touchConversation(conv.id, String(title).slice(0, 80) || conv.title);
+  res.json({ conversation: await getConversation(req.user.id, conv.id) });
 });
-app.delete('/api/chat/conversations/:id', authMiddleware, (req, res) => {
-  deleteConversation(req.user.id, req.params.id);
+app.delete('/api/chat/conversations/:id', authMiddleware, async (req, res) => {
+  await deleteConversation(req.user.id, req.params.id);
   res.json({ ok: true });
 });
-app.get('/api/chat/history', authMiddleware, (req, res) => {
+app.get('/api/chat/history', authMiddleware, async (req, res) => {
   const cid = String(req.query.conversationId || '') || null;
-  res.json({ messages: getHistory(req.user.id, 50, cid) });
+  res.json({ messages: await getHistory(req.user.id, 50, cid) });
 });
 app.post('/api/chat', authMiddleware, async (req, res) => {
   const { message = '', personality = 'auto', conversationId = '' } = req.body || {};
   const text = String(message).slice(0, 2000).trim();
   if (!text) return res.status(400).json({ error: 'Please write a little something first.' });
   if (!PERSONALITIES[personality]) return res.status(400).json({ error: 'Unknown personality.' });
-  let conv = String(conversationId) ? getConversation(req.user.id, String(conversationId)) : null;
-  if (!conv) conv = createConversation(req.user.id);
-  const history = getHistory(req.user.id, 30, conv.id);
+  let conv = String(conversationId) ? await getConversation(req.user.id, String(conversationId)) : null;
+  if (!conv) conv = await createConversation(req.user.id);
+  const history = await getHistory(req.user.id, 30, conv.id);
   const { text: reply, emotion, offline } = await completeWithOpenCode({ history, userText: text, personality });
-  saveMessage(req.user.id, 'user', text, emotion, personality, conv.id);
-  saveMessage(req.user.id, 'assistant', reply, emotion, personality, conv.id);
-  if (conv.title === 'New conversation') touchConversation(conv.id, text.slice(0, 42));
-  else touchConversation(conv.id);
-  res.json({ reply, emotion, personality, offline, conversation: getConversation(req.user.id, conv.id) });
+  await saveMessage(req.user.id, 'user', text, emotion, personality, conv.id);
+  await saveMessage(req.user.id, 'assistant', reply, emotion, personality, conv.id);
+  if (conv.title === 'New conversation') await touchConversation(conv.id, text.slice(0, 42));
+  else await touchConversation(conv.id);
+  res.json({ reply, emotion, personality, offline, conversation: await getConversation(req.user.id, conv.id) });
 });
-app.delete('/api/chat/history', authMiddleware, (req, res) => {
-  db.prepare('DELETE FROM messages WHERE user_id = ?').run(req.user.id);
-  db.prepare('DELETE FROM conversations WHERE user_id = ?').run(req.user.id);
+app.delete('/api/chat/history', authMiddleware, async (req, res) => {
+  await db.prepare('DELETE FROM messages WHERE user_id = ?').run(req.user.id);
+  await db.prepare('DELETE FROM conversations WHERE user_id = ?').run(req.user.id);
   res.json({ ok: true });
 });
 app.get('/api/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));

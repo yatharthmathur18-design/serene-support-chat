@@ -20,6 +20,7 @@
     "express-rate-limit": "^7.2.0",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
+    "@libsql/client": "^0.15.0",
     "serverless-http": "^3.2.0"
   }
 }
