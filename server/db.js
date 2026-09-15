@@ -1,15 +1,19 @@
 import crypto from 'node:crypto';
 import { DB_PATH } from './paths.js';
 
-const useTurso = Boolean(process.env.TURSO_DATABASE_URL);
-let _client = null;
+const pgUrl = process.env.DATABASE_URL || process.env.NETLIFY_DATABASE_URL;
+const usePg = Boolean(pgUrl);
+
+let _pool = null;
 let _dbSync = null;
 
-if (useTurso) {
-  const { createClient } = await import('@libsql/client');
-  _client = createClient({
-    url: process.env.TURSO_DATABASE_URL,
-    authToken: process.env.TURSO_AUTH_TOKEN
+if (usePg) {
+  const pg = await import('pg');
+  const Pool = pg.default?.Pool || pg.Pool;
+  _pool = new Pool({
+    connectionString: pgUrl,
+    ssl: pgUrl.includes('neon.tech') ? { rejectUnauthorized: false } : undefined,
+    max: 5
   });
 } else {
   const { DatabaseSync } = await import('node:sqlite');
@@ -19,21 +23,28 @@ if (useTurso) {
   _dbSync.exec(`PRAGMA journal_mode = WAL;`);
 }
 
-// Unified async wrapper — same shape for local (sync) and Turso (async).
+// Translate SQLite "?" placeholders to Postgres "$1, $2, ..." when on Neon.
+function pgSql(sql) {
+  if (!usePg) return sql;
+  let i = 0;
+  return sql.replace(/\?/g, () => `$${++i}`);
+}
+
 export const db = {
   prepare(sql) {
-    if (useTurso) {
+    const q = pgSql(sql);
+    if (usePg) {
       return {
         get: async (...params) => {
-          const r = await _client.execute({ sql, args: params });
+          const r = await _pool.query(q, params);
           return r.rows[0] ?? null;
         },
         all: async (...params) => {
-          const r = await _client.execute({ sql, args: params });
+          const r = await _pool.query(q, params);
           return r.rows;
         },
         run: async (...params) => {
-          await _client.execute({ sql, args: params });
+          await _pool.query(q, params);
           return {};
         }
       };
@@ -47,11 +58,10 @@ export const db = {
     }
   },
   exec: async (sql) => {
-    if (useTurso) {
-      // Turso doesn't allow multi-statement execute; split on ; and run sequentially.
+    if (usePg) {
       for (const part of sql.split(';')) {
         const s = part.trim();
-        if (s) await _client.execute(s);
+        if (s) await _pool.query(s);
       }
     } else {
       _dbSync.exec(sql);
@@ -59,7 +69,7 @@ export const db = {
   }
 };
 
-// ---- Schema (top-level await so app never handles requests before tables exist) ----
+// ---- Schema (top-level await — app never serves before tables exist) ----
 await db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -67,9 +77,9 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT DEFAULT '',
   password_hash TEXT DEFAULT '',
   provider TEXT DEFAULT 'email',
-  google_sub TEXT UNIQUE,
-  created_at INTEGER NOT NULL,
-  last_login INTEGER
+  created_at BIGINT NOT NULL,
+  last_login BIGINT,
+  token_version INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
@@ -80,26 +90,24 @@ CREATE TABLE IF NOT EXISTS messages (
   auth_tag TEXT NOT NULL,
   emotion TEXT DEFAULT '',
   personality TEXT DEFAULT '',
-  created_at INTEGER NOT NULL
+  conversation_id TEXT,
+  created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_user_time ON messages(user_id, created_at);
-`);
-
-await db.exec(`
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title TEXT DEFAULT 'New conversation',
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_conv_user_time ON conversations(user_id, updated_at);
 `);
 
 // Migrations — best-effort, ignore if already applied.
-try { await db.exec(`ALTER TABLE messages ADD COLUMN conversation_id TEXT`); } catch { /* already migrated */ }
-try { await db.exec(`ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0`); } catch { /* already migrated */ }
-try { await db.exec(`ALTER TABLE users DROP COLUMN google_sub`); } catch { /* kept or already gone */ }
+try { await db.exec(`ALTER TABLE messages ADD COLUMN conversation_id TEXT`); } catch {}
+try { await db.exec(`ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0`); } catch {}
+try { await db.exec(`ALTER TABLE users DROP COLUMN IF EXISTS google_sub`); } catch {}
 
 // House pre-existing messages into one archive chat per user (for local upgrades).
 try {
@@ -108,13 +116,13 @@ try {
     const first = await db.prepare(`SELECT iv, ciphertext, auth_tag FROM messages WHERE user_id = ? AND conversation_id IS NULL ORDER BY created_at ASC LIMIT 1`).get(u.uid);
     if (!first) continue;
     let title = 'Earlier chats';
-    try { const t = decryptText(first).slice(0, 42).trim(); if (t) title = t; } catch { /* keep default */ }
+    try { const t = decryptText(first).slice(0, 42).trim(); if (t) title = t; } catch {}
     const cid = uid();
     const tnow = now();
     await db.prepare(`INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`).run(cid, u.uid, title, tnow, tnow);
     await db.prepare(`UPDATE messages SET conversation_id = ? WHERE user_id = ? AND conversation_id IS NULL`).run(cid, u.uid);
   }
-} catch { /* fresh DB, nothing to migrate */ }
+} catch {}
 
 // ---- AES-256-GCM at-rest encryption ----
 function getKey() {
