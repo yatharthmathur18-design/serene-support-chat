@@ -1,10 +1,12 @@
-// Serene frontend — privacy-first: chat text only goes to YOUR backend.
+// Serene — 100% local, no login, no database.
 
 const $ = (s) => document.querySelector(s);
-let mode = 'login';
 let personalities = { auto: { label: 'Auto-Adapt', desc: 'Reads your feelings and gently matches your energy.' } };
-let currentConvId = localStorage.getItem('serene-conv') || null;
-let convCache = [];
+
+const LS_KEY = 'serene:convs';
+const LS_CURRENT = 'serene:current';
+let convs = [];
+let currentId = null;
 
 const EMOTION_LABEL = {
   anxious: 'sensing some anxiety — softening my tone',
@@ -32,7 +34,6 @@ function localEmotion(t = '') {
 
 async function api(path, opts = {}) {
   const r = await fetch(path, {
-    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined
@@ -41,93 +42,54 @@ async function api(path, opts = {}) {
   if (!r.ok) throw new Error(data.error || 'Something went wrong');
   return data;
 }
+const fmtTime = (ts) => new Date(ts || Date.now()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
-const fmtTime = (ts) =>
-  new Date(ts || Date.now()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+function loadStore() {
+  try { convs = JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { convs = []; }
+  currentId = localStorage.getItem(LS_CURRENT) || null;
+  if (currentId && !convs.some(c => c.id === currentId)) currentId = convs[0]?.id || null;
+}
+function saveStore() {
+  localStorage.setItem(LS_KEY, JSON.stringify(convs));
+  if (currentId) localStorage.setItem(LS_CURRENT, currentId);
+  else localStorage.removeItem(LS_CURRENT);
+}
+function getCurrent() { return convs.find(c => c.id === currentId) || null; }
+function newId() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
 
-/* ---------- palette (light only, persisted) ---------- */
+/* palette */
 function setPalette(p) {
   if (!['meadow', 'mist', 'oat'].includes(p)) p = 'meadow';
   document.documentElement.dataset.palette = p;
   localStorage.setItem('serene-palette', p);
-  document.querySelectorAll('.palette').forEach((b) =>
-    b.setAttribute('aria-pressed', String(b.dataset.palette === p))
-  );
+  document.querySelectorAll('.palette').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.palette === p)));
 }
 document.querySelectorAll('.palette').forEach((b) => (b.onclick = () => setPalette(b.dataset.palette)));
 setPalette(localStorage.getItem('serene-palette') || 'meadow');
 
-/* ---------- drawer (mobile) ---------- */
+/* drawer */
 const drawer = $('#drawer'), scrim = $('#scrim');
-function openDrawer() {
-  drawer.classList.add('open');
-  scrim.hidden = false;
-  $('#closeDrawer').focus();
-}
-function closeDrawer() {
-  drawer.classList.remove('open');
-  scrim.hidden = true;
-}
+function openDrawer() { drawer.classList.add('open'); scrim.hidden = false; $('#closeDrawer').focus(); }
+function closeDrawer() { drawer.classList.remove('open'); scrim.hidden = true; }
 $('#menuBtn').onclick = openDrawer;
 $('#closeDrawer').onclick = closeDrawer;
 scrim.onclick = closeDrawer;
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && drawer.classList.contains('open')) closeDrawer();
-});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer.classList.contains('open')) closeDrawer(); });
 
-/* ---------- auth ---------- */
-$('#tabLogin').onclick = () => { mode = 'login'; syncTabs(); };
-$('#tabRegister').onclick = () => { mode = 'register'; syncTabs(); };
-function syncTabs() {
-  $('#tabLogin').classList.toggle('active', mode === 'login');
-  $('#tabRegister').classList.toggle('active', mode === 'register');
-  $('#nameWrap').hidden = mode !== 'register';
-  $('#authTitle').textContent = mode === 'register' ? 'Begin somewhere softer' : 'Welcome back';
-  $('#emailBtn').textContent = mode === 'register' ? 'Create my private space' : 'Continue with email';
-}
-$('#emailBtn').onclick = async () => {
-  const btn = $('#emailBtn');
-  btn.disabled = true;
-  $('#authMsg').textContent = 'One moment…';
-  try {
-    const body = { email: $('#authEmail').value, password: $('#authPass').value, name: $('#authName').value };
-    const { user } = await api(mode === 'register' ? '/api/auth/register' : '/api/auth/login', {
-      method: 'POST', body
-    });
-    enterChat(user);
-  } catch (e) {
-    $('#authMsg').textContent = e.message;
-  }
-  btn.disabled = false;
-};
-
-/* ---------- conversations ---------- */
-function persistConv() {
-  if (currentConvId) localStorage.setItem('serene-conv', currentConvId);
-  else localStorage.removeItem('serene-conv');
+/* greet */
+{
+  const h = new Date().getHours();
+  $('#greet').textContent = h < 12 ? 'Good morning — take a breath…' : h < 18 ? 'Good afternoon — take a breath…' : 'Good evening — take a breath…';
 }
 
-async function loadConversations() {
-  try {
-    const { conversations } = await api('/api/chat/conversations');
-    convCache = conversations;
-  } catch { convCache = []; }
-  if (currentConvId && !convCache.some((c) => c.id === currentConvId)) currentConvId = null;
-  if (!currentConvId && convCache.length) currentConvId = convCache[0].id;
-  persistConv();
-  renderConvs();
-}
-
+/* conversations */
 function renderConvs() {
   const list = $('#convList');
   list.innerHTML = '';
-  if (!convCache.length) {
-    list.innerHTML = '<p class="conv-empty">No chats yet — begin below.</p>';
-    return;
-  }
-  for (const c of convCache) {
+  if (!convs.length) { list.innerHTML = '<p class="conv-empty">No chats yet — begin below.</p>'; return; }
+  for (const c of convs) {
     const item = document.createElement('div');
-    item.className = 'conv-item' + (c.id === currentConvId ? ' active' : '');
+    item.className = 'conv-item' + (c.id === currentId ? ' active' : '');
     const open = document.createElement('button');
     open.className = 'conv-open';
     open.title = c.title || 'New conversation';
@@ -135,94 +97,52 @@ function renderConvs() {
     label.className = 't';
     label.textContent = c.title || 'New conversation';
     open.appendChild(label);
-    open.onclick = () => switchConv(c.id);
+    open.onclick = () => { currentId = c.id; saveStore(); renderConvs(); renderMessages(); if (innerWidth < 920) closeDrawer(); $('#input').focus(); };
     const del = document.createElement('button');
     del.className = 'x';
     del.textContent = '×';
     del.setAttribute('aria-label', `Delete “${c.title || 'conversation'}”`);
-    del.onclick = async (e) => {
+    del.onclick = (e) => {
       e.stopPropagation();
-      if (!confirm('Delete this conversation and all its messages?')) return;
-      await api(`/api/chat/conversations/${c.id}`, { method: 'DELETE' });
-      if (currentConvId === c.id) currentConvId = null;
-      await loadConversations();
-      await openCurrent(true);
+      if (!confirm('Delete this conversation?')) return;
+      convs = convs.filter(x => x.id !== c.id);
+      if (currentId === c.id) currentId = convs[0]?.id || null;
+      saveStore(); renderConvs(); renderMessages();
     };
     item.append(open, del);
     list.appendChild(item);
   }
 }
-
-async function openCurrent(showStarter = true) {
+function renderMessages() {
   $('#messages').innerHTML = '';
-  if (!currentConvId) {
-    if (showStarter) pushBot('A fresh, quiet page — just for us. What’s on your heart today?');
-    return false;
+  const cur = getCurrent();
+  if (!cur || !cur.messages.length) {
+    pushBot('Welcome in. I\'m Serene — I listen first, and I don\'t rush.\n\nWhatever\'s on your heart today, share it at your own pace. What\'s been sitting with you?', 'neutral', Date.now(), true);
+    return;
   }
-  try {
-    const { messages } = await api(`/api/chat/history?conversationId=${encodeURIComponent(currentConvId)}`);
-    for (const m of messages.slice(-30)) bubble(m.content, m.role === 'assistant' ? 'bot' : 'user', '', m.created_at);
-    if (!messages.length && showStarter) pushBot('A fresh, quiet page — just for us. What’s on your heart today?');
-    return messages.length > 0;
-  } catch {
-    return false;
+  for (const m of cur.messages.slice(-50)) bubble(m.content, m.role === 'assistant' ? 'bot' : 'user', m.emotion || '', m.created_at);
+}
+function ensureCurrent() {
+  if (!getCurrent()) {
+    const c = { id: newId(), title: 'New conversation', messages: [], created_at: Date.now(), updated_at: Date.now() };
+    convs.unshift(c);
+    currentId = c.id;
+    saveStore();
+    renderConvs();
   }
 }
-
-async function switchConv(id) {
-  currentConvId = id;
-  persistConv();
-  renderConvs();
-  await openCurrent();
-  if (window.innerWidth < 920) closeDrawer();
+$('#newChatBtn').onclick = () => {
+  const c = { id: newId(), title: 'New conversation', messages: [], created_at: Date.now(), updated_at: Date.now() };
+  convs.unshift(c);
+  currentId = c.id;
+  saveStore(); renderConvs(); renderMessages();
+  if (innerWidth < 920) closeDrawer();
   $('#input').focus();
-}
+};
 
-async function newChat() {
-  currentConvId = null;
-  persistConv();
-  renderConvs();
-  await openCurrent();
-  if (window.innerWidth < 920) closeDrawer();
-  $('#input').focus();
-}
-$('#newChatBtn').onclick = newChat;
-
-/* ---------- chat ---------- */
-function greetingFor(user) {
-  const h = new Date().getHours();
-  const part = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
-  const name = user.name || user.email.split('@')[0];
-  return `${part}, ${name}.`;
-}
-
-async function enterChat(user) {
-  $('#authView').classList.add('hidden');
-  $('#chatView').classList.remove('hidden');
-  $('#meName').textContent = user.name || user.email.split('@')[0];
-  $('#meEmail').textContent = user.email;
-  const first = (user.name || 'friend').trim().split(/\s+/)[0];
-  $('#avatar').textContent = (first[0] || 'S').toUpperCase();
-  $('#greet').textContent = greetingFor(user);
-  await loadPersonalities();
-  await loadConversations();
-  const hadConvs = convCache.length > 0;
-  const hasHistory = await openCurrent(false);
-  if (!hadConvs) {
-    pushBot(
-      `Welcome in. I'm Serene — I listen first, and I don't rush.\n\nWhatever's on your heart today, share it at your own pace. What's been sitting with you?`,
-      'neutral',
-      Date.now()
-    );
-  } else if (!hasHistory) {
-    pushBot('A fresh, quiet page — just for us. What’s on your heart today?');
-  }
-}
-
+/* personalities */
 async function loadPersonalities() {
-  try {
-    personalities = await api('/api/personalities');
-  } catch { /* keep default */ }
+  try { personalities = await api('/api/personalities'); } catch {}
   const saved = localStorage.getItem('serene-persona') || 'auto';
   const list = $('#personaList');
   list.innerHTML = '';
@@ -235,18 +155,15 @@ async function loadPersonalities() {
     input.checked = key === saved;
     input.onchange = () => {
       localStorage.setItem('serene-persona', key);
-      $('#adaptPill').textContent =
-        key === 'auto' ? 'Auto-adapt is listening…' : `${short} is with you — steady and warm.`;
-      if (window.innerWidth < 920) closeDrawer();
+      $('#adaptPill').textContent = key === 'auto' ? 'Auto-adapt is listening…' : `${short} is with you — steady and warm.`;
+      if (innerWidth < 920) closeDrawer();
     };
     list.appendChild(label);
   }
 }
+function selectedPersona() { return document.querySelector('input[name="persona"]:checked')?.value || 'auto'; }
 
-function selectedPersona() {
-  return document.querySelector('input[name="persona"]:checked')?.value || 'auto';
-}
-
+/* bubbles */
 function bubble(text, who, emotion = '', ts) {
   const row = document.createElement('div');
   row.className = `msg-row ${who}`;
@@ -255,130 +172,82 @@ function bubble(text, who, emotion = '', ts) {
   b.textContent = text;
   const t = document.createElement('div');
   t.className = 'time';
-  t.textContent = who === 'bot' && emotion && emotion !== 'neutral'
-    ? `${EMOTION_LABEL[emotion] || 'listening'} · ${fmtTime(ts)}`
-    : fmtTime(ts);
+  t.textContent = who === 'bot' && emotion && emotion !== 'neutral' ? `${EMOTION_LABEL[emotion] || 'listening'} · ${fmtTime(ts)}` : fmtTime(ts);
   row.append(b, t);
   $('#messages').appendChild(row);
   $('#messages').scrollTop = $('#messages').scrollHeight;
 }
-const pushUser = (t, ts) => bubble(t, 'user', '', ts || Date.now());
-const pushBot = (t, emo, ts) => bubble(t, 'bot', emo || '', ts || Date.now());
-
-function upsertConv(conv) {
-  if (!conv) return;
-  currentConvId = conv.id;
-  persistConv();
-  const i = convCache.findIndex((c) => c.id === conv.id);
-  if (i >= 0) convCache[i] = conv;
-  else convCache.unshift(conv);
-  convCache.sort((a, b) => b.updated_at - a.updated_at);
-  renderConvs();
+function pushBot(t, emo, ts, isWelcome) {
+  if (isWelcome && $('#messages').querySelector('.msg-row')) return;
+  bubble(t, 'bot', emo || '', ts || Date.now());
 }
+const pushUser = (t, ts) => bubble(t, 'user', '', ts || Date.now());
 
+/* composer */
 $('#composer').onsubmit = async (e) => {
   e.preventDefault();
   const ta = $('#input');
   const text = ta.value.trim();
   if (!text) return;
-  ta.value = '';
-  ta.style.height = 'auto';
-  // remove the unsaved starter note once real words arrive
-  if (!currentConvId && !$('#messages').querySelector('.msg-row.user')) $('#messages').innerHTML = '';
+  ta.value = ''; ta.style.height = 'auto';
+  ensureCurrent();
+  const cur = getCurrent();
+  // clear welcome if first real message
+  if (cur.messages.length === 0) $('#messages').innerHTML = '';
+  const userMsg = { role: 'user', content: text, created_at: Date.now() };
+  cur.messages.push(userMsg);
+  if (cur.title === 'New conversation') cur.title = text.slice(0, 42);
+  cur.updated_at = Date.now();
+  saveStore(); renderConvs();
   pushUser(text);
   const emo = localEmotion(text);
-  $('#adaptPill').textContent =
-    selectedPersona() === 'auto' && emo !== 'neutral'
-      ? `Auto-adapt: ${EMOTION_LABEL[emo]}.`
-      : 'Serene is listening…';
+  $('#adaptPill').textContent = selectedPersona() === 'auto' && emo !== 'neutral' ? `Auto-adapt: ${EMOTION_LABEL[emo]}.` : 'Serene is listening…';
   $('#typing').classList.remove('hidden');
   try {
-    const { reply, emotion, offline, conversation } = await api('/api/chat', {
+    const history = cur.messages.slice(-20).map(m => ({ role: m.role, content: m.content }));
+    // remove the just-added user msg from history (server adds it)
+    history.pop();
+    const { reply, emotion, offline } = await api('/api/chat', {
       method: 'POST',
-      body: { message: text, personality: selectedPersona(), conversationId: currentConvId }
+      body: { message: text, personality: selectedPersona(), history }
     });
     $('#typing').classList.add('hidden');
     $('#offlineBadge').classList.toggle('hidden', !offline);
-    upsertConv(conversation);
-    pushBot(reply, emotion);
+    cur.messages.push({ role: 'assistant', content: reply, emotion, created_at: Date.now() });
+    cur.updated_at = Date.now();
+    saveStore(); renderConvs();
+    bubble(reply, 'bot', emotion);
   } catch (err) {
     $('#typing').classList.add('hidden');
-    pushBot(`I'm still here — but that message couldn't go through (${err.message}). Take a breath, and try again when you're ready.`);
+    bubble(`I'm still here — but that message couldn't go through (${err.message}). Take a breath, and try again when you're ready.`, 'bot');
   }
 };
-$('#input').addEventListener('input', (e) => {
-  e.target.style.height = 'auto';
-  e.target.style.height = Math.min(132, e.target.scrollHeight) + 'px';
-});
-$('#input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    $('#composer').requestSubmit();
-  }
-});
-document.querySelectorAll('.quick button').forEach(
-  (b) => (b.onclick = () => {
-    $('#input').value = b.dataset.q;
-    $('#composer').requestSubmit();
-    $('#input').focus();
-  })
-);
+$('#input').addEventListener('input', (e) => { e.target.style.height = 'auto'; e.target.style.height = Math.min(132, e.target.scrollHeight) + 'px'; });
+$('#input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#composer').requestSubmit(); } });
+document.querySelectorAll('.quick button').forEach((b) => (b.onclick = () => { $('#input').value = b.dataset.q; $('#composer').requestSubmit(); $('#input').focus(); }));
 
-/* ---------- keyboard-aware composer (mobile) ---------- */
+/* keyboard-aware */
 (function keyboardAware() {
   const vv = window.visualViewport;
   const msgs = () => $('#messages');
   function sync() {
     if (!vv) return;
-    // gap between layout viewport and visible area = keyboard height
     const overlap = Math.max(0, window.innerHeight - vv.height - (vv.offsetTop || 0));
     document.documentElement.style.setProperty('--kb', Math.round(overlap) + 'px');
   }
-  if (vv) {
-    vv.addEventListener('resize', () => { sync(); msgs().scrollTop = msgs().scrollHeight; });
-    vv.addEventListener('scroll', sync);
-    sync();
-  }
-  $('#input').addEventListener('focus', () => {
-    // after the keyboard finishes opening, lift + reveal latest message
-    setTimeout(() => { sync(); msgs().scrollTop = msgs().scrollHeight; }, 350);
-  });
+  if (vv) { vv.addEventListener('resize', () => { sync(); msgs().scrollTop = msgs().scrollHeight; }); vv.addEventListener('scroll', sync); sync(); }
+  $('#input').addEventListener('focus', () => { setTimeout(() => { sync(); msgs().scrollTop = msgs().scrollHeight; }, 350); });
 })();
 
-/* ---------- data controls ---------- */
-$('#wipeBtn').onclick = async () => {
-  if (!confirm('Erase all your conversations? Your account stays. This cannot be undone.')) return;
-  await api('/api/chat/history', { method: 'DELETE' });
-  currentConvId = null;
-  convCache = [];
-  persistConv();
-  renderConvs();
-  $('#messages').innerHTML = '';
-  pushBot('All clear — a fresh, quiet page. Whatever you share next stays only between us.');
-  if (window.innerWidth < 920) closeDrawer();
-};
-$('#logoutBtn').onclick = async () => {
-  await api('/api/auth/logout', { method: 'POST' });
-  location.reload();
-};
-$('#delAccountBtn').onclick = async () => {
-  if (!confirm('Delete your account and every word? This is permanent.')) return;
-  if (!confirm('Take a breath — really erase everything?')) return;
-  const pw = prompt('Last step — enter your password to confirm it’s you:');
-  if (pw === null) return;
-  try {
-    await api('/api/auth/account', { method: 'DELETE', body: { password: pw } });
-    location.reload();
-  } catch (e) { alert(e.message); }
+/* wipe */
+$('#wipeBtn').onclick = () => {
+  if (!confirm('Erase all conversations on this device? This cannot be undone.')) return;
+  convs = []; currentId = null; saveStore(); renderConvs(); renderMessages();
+  if (innerWidth < 920) closeDrawer();
 };
 
-/* ---------- boot ---------- */
-(async () => {
-  syncTabs();
-  try {
-    const { user } = await api('/api/auth/me');
-    enterChat(user);
-  } catch {
-    $('#authView').classList.remove('hidden');
-  }
-})();
+/* boot */
+loadStore();
+loadPersonalities();
+renderConvs();
+renderMessages();

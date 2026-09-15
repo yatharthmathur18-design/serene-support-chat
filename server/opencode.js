@@ -1,9 +1,4 @@
-// OpenCode API client — talks to `opencode serve` (OpenAI-compatible /v1).
-// Start it with:  opencode auth login  →  opencode serve --port 4096
-// If unreachable and OFFLINE_MODE!=false, falls back to a local comforting responder
-// so the app (auth + UI + privacy) keeps working as a demo.
-
-import { buildSystemPrompt, detectEmotion, crisisResources } from './chat.js';
+import { PERSONALITIES, buildSystemPrompt, detectEmotion, crisisResources } from './chat.js';
 
 const BASE = (process.env.OPENCODE_BASE_URL || 'http://127.0.0.1:4096/v1').replace(/\/$/, '');
 const MODEL = process.env.OPENCODE_MODEL || 'openai/gpt-oss-20b';
@@ -11,16 +6,12 @@ const MODEL = process.env.OPENCODE_MODEL || 'openai/gpt-oss-20b';
 export async function completeWithOpenCode({ history = [], userText = '', personality = 'auto' }) {
   const emotion = detectEmotion(userText);
   const system = buildSystemPrompt({ personality, emotion });
-
   const messages = [
     { role: 'system', content: system },
     ...history.slice(-14).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
     { role: 'user', content: userText }
   ];
-
   if (process.env.OFFLINE_MODE === 'true') return { text: offlineReply(userText, emotion), emotion, offline: true };
-
-  // Retry on transient congestion (429/503 are common on free NIM capacity).
   let lastErr = new Error('unknown');
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
@@ -35,7 +26,6 @@ export async function completeWithOpenCode({ history = [], userText = '', person
         },
         body: JSON.stringify({ model: MODEL, messages, temperature: 0.8, max_tokens: 450, stream: false })
       }).finally(() => clearTimeout(t));
-
       if (res.status === 429 || res.status === 503) {
         lastErr = new Error(`backend busy ${res.status}: ${await res.text().catch(() => '')}`);
         await new Promise((r) => setTimeout(r, attempt * 2000));
@@ -54,8 +44,7 @@ export async function completeWithOpenCode({ history = [], userText = '', person
       await new Promise((r) => setTimeout(r, attempt * 2000));
     }
   }
-  // Log status only — backend error bodies can echo user content into logs.
-  console.warn('[ai] backend unreachable after retries, using offline comforting mode:', String(lastErr.message || lastErr).slice(0, 160));
+  console.warn('[ai] backend unreachable after retries, using offline mode:', String(lastErr.message || lastErr).slice(0, 160));
   const text = offlineReply(userText, emotion);
   return { text: emotion === 'crisis' ? `${text}\n\n---\n${crisisResources()}` : text, emotion, offline: true };
 }
@@ -72,20 +61,13 @@ function offlineReply(userText, emotion) {
     crisis: `I'm really glad you told me. You matter, and this pain deserves care and human support with you right now.`,
     neutral: `Thank you for sharing that with me — I'm here, listening.`
   };
-  const closers = [
-    '',
-    '',
-    '',
-    `We can go slowly, one breath at a time.`,
-    `Would it help to try a grounding breath together?`,
-    `No rush at all — I'm right here.`
-  ];
   const middles = [
     `From what you shared — "${t}${userText.length > 120 ? '…' : ''}" — there's clearly more beneath the surface. What's the heaviest part?`,
     `I hear you. If you had to name the hardest piece of this, what would it be?`,
     `That took honesty to say out loud. Want to unpack it a little, or just sit with it for now?`,
     `Got it. No need to explain perfectly — just tell me whatever comes first.`
   ];
+  const closers = ['', '', '', `We can go slowly, one breath at a time.`, `Would it help to try a grounding breath together?`, `No rush at all — I'm right here.`];
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
   const opener = openers[emotion] || openers.neutral;
   const chosenCloser = pick(closers);
